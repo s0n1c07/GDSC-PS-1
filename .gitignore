@@ -1,0 +1,56 @@
+# Build
+build/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.vcxproj*
+*.sln
+*.filters
+*.dir/
+Release/
+Debug/
+x64/
+x86/
+
+# C++ compiled
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models (large GGUF files)
+models/*.gguf
+!models/.gitkeep
+
+# Captures (large JSON files)
+captures/*.json
+captures/*.csv
+!captures/.gitkeep
+
+# Dependencies fetched by CMake
+_deps/
+
+# Logs
+*.log
