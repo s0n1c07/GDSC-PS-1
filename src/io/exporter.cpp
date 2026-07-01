@@ -44,6 +44,7 @@ static json snapshot_to_json(const LayerSnapshot& snap) {
     j["latency_ms"]     = snap.latency_ms;
     j["tensor_shape"]   = snap.tensor_shape;
     j["dtype"]          = snap.dtype;
+    j["op_name"]        = snap.op_name;
     j["n_elements"]     = snap.n_elements;
     j["sparsity"]       = snap.sparsity;
     j["act_min"]        = snap.act_min;

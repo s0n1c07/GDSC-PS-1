@@ -50,10 +50,10 @@ float AttentionHeatmap::get_weight(int row, int col) const {
 }
 
 std::string AttentionHeatmap::weight_to_block(float weight) const {
-    if (weight < contrast_low_)  return "\xe2\x96\x91\xe2\x96\x91"; // ░░
-    if (weight < contrast_mid_)  return "\xe2\x96\x92\xe2\x96\x92"; // ▒▒
-    if (weight < contrast_high_) return "\xe2\x96\x93\xe2\x96\x93"; // ▓▓
-    return "\xe2\x96\x88\xe2\x96\x88"; // ██
+    if (weight < contrast_low_)  return "\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91"; // ░░░░
+    if (weight < contrast_mid_)  return "\xe2\x96\x92\xe2\x96\x92\xe2\x96\x92\xe2\x96\x92"; // ▒▒▒▒
+    if (weight < contrast_high_) return "\xe2\x96\x93\xe2\x96\x93\xe2\x96\x93\xe2\x96\x93"; // ▓▓▓▓
+    return "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88"; // ████
 }
 
 Color AttentionHeatmap::weight_to_color(float weight) const {
@@ -138,15 +138,18 @@ Element AttentionHeatmap::render() {
 
     // Column headers (token labels)
     {
-        std::string header_str = "       "; // Row label space
+        std::string header_str = "      "; // Row label space (6 chars)
         int end_col = std::min(viewport_x_ + VIEWPORT_SIZE, matrix_size_);
         for (int c = viewport_x_; c < end_col; ++c) {
             if (c < static_cast<int>(token_labels_.size())) {
                 std::string label = token_labels_[c];
-                if (label.size() > 2) label = label.substr(0, 2);
-                header_str += " " + label;
+                if (label.size() > 4) label = label.substr(0, 4);
+                while (label.size() < 4) label += " ";
+                header_str += label;
             } else {
-                header_str += "  " + std::to_string(c % 100);
+                std::string num = std::to_string(c % 100);
+                while (num.size() < 4) num += " ";
+                header_str += num;
             }
         }
         rows.push_back(text(header_str) | dim);
@@ -163,13 +166,13 @@ Element AttentionHeatmap::render() {
         std::string row_label;
         if (r < static_cast<int>(token_labels_.size())) {
             row_label = token_labels_[r];
-            if (row_label.size() > 5) row_label = row_label.substr(0, 5);
-            while (row_label.size() < 6) row_label += " ";
+            if (row_label.size() > 4) row_label = row_label.substr(0, 4);
+            while (row_label.size() < 5) row_label += " ";
         } else {
             row_label = std::to_string(r);
-            while (row_label.size() < 6) row_label += " ";
+            while (row_label.size() < 5) row_label += " ";
         }
-        cells.push_back(text(row_label) | dim | size(WIDTH, EQUAL, 7));
+        cells.push_back(text(row_label) | dim | size(WIDTH, EQUAL, 6));
 
         // Weight cells
         for (int c = viewport_x_; c < end_col; ++c) {

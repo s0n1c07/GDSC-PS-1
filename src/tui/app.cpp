@@ -11,6 +11,7 @@
 
 #include <filesystem>
 #include <thread>
+#include <chrono>
 
 namespace fs = std::filesystem;
 using namespace ftxui;
@@ -33,19 +34,31 @@ App::~App() {
     if (engine_) {
         engine_->stop();
     }
+    // Auto-export if requested
+    if (config_.auto_export && !snapshot_buffer_.empty()) {
+        auto snapshots = snapshot_buffer_.snapshot();
+        std::string model_name = engine_ && engine_->get_model()
+            ? engine_->get_model()->name : "unknown";
+        export_capture("captures", model_name, snapshots, config_.buffer_size);
+    }
+}
+
+// ─── CLI-driven launch (skips startup menu) ───────────────────
+void App::launch_with_config(const AppConfig& config,
+                              const std::string& initial_prompt)
+{
+    cli_initial_prompt_ = initial_prompt;
+    on_launch(config);
 }
 
 void App::run() {
     debug_log("App::run() started");
 
-    // Start with the startup menu
     debug_log("App::run(): building startup screen");
     auto startup = build_startup_screen();
     debug_log("App::run(): building dashboard");
     auto dashboard = build_dashboard();
 
-    // Top-level container that switches between startup and dashboard
-    // Wrap in a renderer that picks the active screen
     auto main_component = Container::Tab({
         startup,
         dashboard
@@ -66,7 +79,6 @@ void App::run() {
         }
     });
 
-    // Catch global keys
     debug_log("App::run(): setting up CatchEvent");
     app_component = CatchEvent(app_component, [&, this](Event event) -> bool {
         // Q to quit (only in dashboard)
@@ -90,8 +102,6 @@ void App::run() {
 
 // ─── Startup screen ───────────────────────────────────────────
 Component App::build_startup_screen() {
-    // Scan for available models and captures
-    std::string exe_dir = ".";
     auto model_files   = scan_model_files("models");
     auto capture_files = scan_capture_files("captures");
 
@@ -107,7 +117,6 @@ Component App::build_startup_screen() {
 
 // ─── Dashboard ─────────────────────────────────────────────────
 Component App::build_dashboard() {
-    // Panel components
     auto topology_comp  = topology_tree_.component();
     auto stream_comp    = packet_stream_.component();
     auto heatmap_comp   = attention_heatmap_.component();
@@ -126,8 +135,6 @@ Component App::build_dashboard() {
         }
     };
     auto prompt_input = Input(&prompt_text_, "Type prompt and press Enter...", prompt_opt);
-
-    // Export button functionality embedded in key handler
 
     auto row1_container = Container::Horizontal({
         topology_comp,
@@ -148,20 +155,32 @@ Component App::build_dashboard() {
 
     // Main dashboard renderer
     return CatchEvent(
-        Renderer(panels, [this, topology_comp, stream_comp, heatmap_comp, metrics_comp, anomaly_comp, prompt_input] {
-            // Refresh data from engine
+        Renderer(panels, [this, topology_comp, stream_comp, heatmap_comp,
+                          metrics_comp, anomaly_comp, prompt_input] {
             refresh_panels();
 
-            // Panel border colors: active = cyan, inactive = gray
             auto border_for = [&](Component comp) {
                 return comp->Focused()
                     ? color(Color::Cyan)
                     : color(Color::GrayDark);
             };
 
+            auto focus_text = [&](Component comp) {
+                return comp->Focused() ? " (Focus Active)" : "";
+            };
+
             // Build state string
             std::string state_str;
-            if (engine_) {
+            bool is_replay_mode = (engine_ == nullptr);
+            if (is_replay_mode) {
+                if (!replay_snapshots_.empty()) {
+                    state_str = replay_paused_
+                        ? "REPLAY [PAUSED]"
+                        : "REPLAY [PLAYING]";
+                } else {
+                    state_str = "No Engine";
+                }
+            } else {
                 switch (engine_->get_state()) {
                     case InferenceState::Idle:     state_str = "Idle"; break;
                     case InferenceState::Loading:  state_str = "Loading..."; break;
@@ -172,77 +191,70 @@ Component App::build_dashboard() {
                         state_str = "Error: " + engine_->get_error();
                         break;
                 }
-            } else {
-                state_str = config_.replay_mode ? "Replay Mode" : "No Engine";
             }
 
-            // Throughput
             double tps = engine_ ? engine_->get_tokens_per_second() : 0.0;
 
             // Top status bar
             auto status_bar = hbox({
                 text(" [Tab]") | bold | color(Color::Cyan),
-                text(": Focus  ") | dim,
+                text(": Cycle Focus  ") | dim,
                 text("[Q]") | bold | color(Color::Cyan),
-                text(": Quit  ") | dim,
-                text("[P]") | bold | color(Color::Cyan),
-                text(": Pause  ") | dim,
-                text("[E]") | bold | color(Color::Cyan),
-                text(": Export  ") | dim,
-                text("[Esc]") | bold | color(Color::Cyan),
-                text(": Menu  ") | dim,
+                text(": Quit App  ") | dim,
+                is_replay_mode
+                    ? hbox({
+                        text("[Space]") | bold | color(Color::Yellow),
+                        text(": Play/Pause  ") | dim,
+                        text("[n]") | bold | color(Color::Yellow),
+                        text(": Step  ") | dim,
+                        text("[ ][ ]") | bold | color(Color::Yellow),
+                        text(": Speed  ") | dim,
+                      })
+                    : hbox({
+                        text("[P]") | bold | color(Color::Cyan),
+                        text(": Pause  ") | dim,
+                        text("[E]") | bold | color(Color::Cyan),
+                        text(": Export  ") | dim,
+                        text("[Esc]") | bold | color(Color::Cyan),
+                        text(": Menu  ") | dim,
+                      }),
                 filler(),
                 text(" " + state_str + " ") | bold |
                     color(state_str.find("Error") != std::string::npos
-                        ? Color::Red : Color::Green),
+                        ? Color::Red
+                        : (is_replay_mode ? Color::Yellow : Color::Green)),
                 text(" | ") | dim,
                 text(format_float(static_cast<float>(tps), 1) + " tok/s ") |
                     bold | color(Color::GreenLight),
-            }) | borderStyled(HEAVY);
+            });
 
             // Row 1: Topology (35%) + Packet Stream (65%)
             auto row1 = hbox({
-                // Panel 1: Topology
-                vbox({
-                    text(" 1. MODEL TOPOLOGY ") | bold |
-                        color(Color::Cyan),
-                    topology_comp->Render(),
-                }) | size(WIDTH, EQUAL, 40) | border_for(topology_comp),
-                // Panel 2: Packet Stream
-                vbox({
-                    text(" 2. LIVE PACKET STREAM ") | bold |
-                        color(Color::Cyan),
-                    stream_comp->Render(),
-                }) | flex | border_for(stream_comp),
+                window(text(std::string(" 1. MODEL TOPOLOGY") + focus_text(topology_comp)) | bold | color(Color::Cyan),
+                       topology_comp->Render())
+                    | size(WIDTH, EQUAL, 40) | border_for(topology_comp),
+                window(text(std::string(" 2. LIVE PACKET STREAM") + focus_text(stream_comp)) | bold | color(Color::Cyan),
+                       stream_comp->Render())
+                    | flex | border_for(stream_comp),
             }) | size(HEIGHT, EQUAL, 12);
 
             // Row 2: Attention Heatmap (full width)
-            auto row2 = vbox({
-                text(" 3. ATTENTION MATRIX VISUALIZER ") | bold |
-                    color(Color::Cyan),
-                heatmap_comp->Render(),
-            }) | borderStyled(ROUNDED) | border_for(heatmap_comp) |
-                 size(HEIGHT, EQUAL, 12);
+            auto row2 = window(text(std::string(" 3. ATTENTION MATRIX VISUALIZER") + focus_text(heatmap_comp)) | bold | color(Color::Cyan),
+                               heatmap_comp->Render())
+                | border_for(heatmap_comp) | size(HEIGHT, EQUAL, 12);
 
             // Row 3: Metrics (50%) + Anomaly Ledger (50%)
             auto row3 = hbox({
-                // Panel 4: Metrics
-                vbox({
-                    text(" 4. RUNTIME METRICS ") | bold |
-                        color(Color::Cyan),
-                    metrics_comp->Render(),
-                }) | flex | border_for(metrics_comp),
-                // Panel 5: Anomaly Ledger
-                vbox({
-                    text(" 5. ANOMALY LEDGER ") | bold |
-                        color(Color::Cyan),
-                    anomaly_comp->Render(),
-                }) | flex | border_for(anomaly_comp),
+                window(text(std::string(" 4. RUNTIME METRICS INSPECTOR") + focus_text(metrics_comp)) | bold | color(Color::Cyan),
+                       metrics_comp->Render())
+                    | flex | border_for(metrics_comp),
+                window(text(std::string(" 5. NUMERICAL ANOMALY LEDGER") + focus_text(anomaly_comp)) | bold | color(Color::Cyan),
+                       anomaly_comp->Render())
+                    | flex | border_for(anomaly_comp),
             });
 
             // Generated text display
-            std::string gen_text = engine_
-                ? engine_->get_generated_text() : "";
+            std::string gen_text = engine_ ? engine_->get_generated_text() : "";
             auto gen_display = text("");
             if (!gen_text.empty()) {
                 std::string display = gen_text;
@@ -253,15 +265,50 @@ Component App::build_dashboard() {
                     color(Color::GreenLight) | dim;
             }
 
-            // Prompt bar
-            bool is_replay_mode = (engine_ == nullptr);
-            auto prompt_bar = hbox({
-                text(is_replay_mode ? " [REPLAY MODE] " : " > ") | bold | color(is_replay_mode ? Color::Red : Color::Cyan),
-                (is_replay_mode ? text("Prompt disabled. Please load a .gguf model to run live inference.") | dim | flex : prompt_input->Render() | flex),
-            }) | borderStyled(ROUNDED) |
-                 ((prompt_input->Focused() && !is_replay_mode)
-                    ? color(Color::Cyan)
-                    : color(Color::GrayDark));
+            // Prompt bar / Replay seek bar
+            Element bottom_bar;
+            if (is_replay_mode && !replay_snapshots_.empty()) {
+                // ── Replay seek bar ────────────────────────────────
+                size_t total = replay_snapshots_.size();
+                size_t idx   = std::min(replay_index_, total - 1);
+                int pct = (total > 1)
+                    ? static_cast<int>((idx * 100) / (total - 1))
+                    : 100;
+
+                // Build a simple ASCII bar
+                int bar_width = 40;
+                int filled = (bar_width * pct) / 100;
+                std::string bar = "[";
+                for (int i = 0; i < bar_width; ++i)
+                    bar += (i < filled) ? "=" : "-";
+                bar += "]";
+
+                std::string seek_text =
+                    " REPLAY " + bar
+                    + " " + std::to_string(idx + 1)
+                    + "/" + std::to_string(total)
+                    + "  Speed: " + std::to_string(replay_speed_ms_) + "ms ";
+
+                bottom_bar = hbox({
+                    text(replay_paused_ ? " [PAUSED] " : " [PLAYING] ")
+                        | bold
+                        | color(replay_paused_ ? Color::Red : Color::Green),
+                    text(seek_text) | color(Color::Yellow),
+                }) | borderStyled(ROUNDED) | color(Color::Yellow);
+            } else {
+                // ── Normal prompt bar ─────────────────────────────
+                bottom_bar = hbox({
+                    text(is_replay_mode ? " [REPLAY MODE] " : " > ")
+                        | bold
+                        | color(is_replay_mode ? Color::Red : Color::Cyan),
+                    (is_replay_mode
+                        ? text("Prompt disabled. Please load a .gguf model to run live inference.") | dim | flex
+                        : prompt_input->Render() | flex),
+                }) | borderStyled(ROUNDED)
+                   | ((prompt_input->Focused() && !is_replay_mode)
+                       ? color(Color::Cyan)
+                       : color(Color::GrayDark));
+            }
 
             return vbox({
                 status_bar,
@@ -269,30 +316,70 @@ Component App::build_dashboard() {
                 row2,
                 row3,
                 gen_display,
-                prompt_bar,
+                bottom_bar,
             });
         }),
-        [&, prompt_input](Event event) -> bool {
-            // Do not trigger global hotkeys if the user is typing in the prompt
+        [&, prompt_input, this](Event event) -> bool {
+            bool is_replay_mode = (engine_ == nullptr);
+
+            // ── Replay-mode keybindings ───────────────────────────
+            if (is_replay_mode && !replay_snapshots_.empty()) {
+                // Space: toggle play/pause
+                if (event == Event::Character(' ')) {
+                    replay_paused_ = !replay_paused_;
+                    if (!replay_paused_)
+                        replay_last_tick_ = std::chrono::steady_clock::now();
+                    return true;
+                }
+                // n: step forward one snapshot
+                if (event == Event::Character('n')) {
+                    if (replay_index_ + 1 < replay_snapshots_.size()) {
+                        ++replay_index_;
+                        auto& snap = replay_snapshots_[replay_index_];
+                        metrics_panel_.set_snapshot(snap);
+                        metrics_panel_.add_latency_sample(
+                            static_cast<float>(snap.latency_ms));
+                        metrics_panel_.add_stats_sample(
+                            snap.act_min, snap.act_mean, snap.act_max);
+                        if (!snap.attention_weights.empty())
+                            attention_heatmap_.set_data(
+                                snap.attention_weights, snap.attn_size,
+                                snap.num_heads);
+                    }
+                    return true;
+                }
+                // [: increase speed (lower delay, min 50ms)
+                if (event == Event::Character('[')) {
+                    replay_speed_ms_ = std::max(50, replay_speed_ms_ - 100);
+                    return true;
+                }
+                // ]: decrease speed (higher delay, max 2000ms)
+                if (event == Event::Character(']')) {
+                    replay_speed_ms_ = std::min(2000, replay_speed_ms_ + 100);
+                    return true;
+                }
+            }
+
+            // Do not trigger live hotkeys if user is typing a prompt
             if (prompt_input->Focused()) {
                 return false;
             }
 
+            // ── Live-mode keybindings ─────────────────────────────
             // P: toggle pause on packet stream
             if (event == Event::Character('p') ||
                 event == Event::Character('P')) {
                 packet_stream_.toggle_pause();
                 return true;
             }
-            // E: export
+            // E: export current capture to JSON
             if (event == Event::Character('e') ||
                 event == Event::Character('E')) {
                 auto snapshots = snapshot_buffer_.snapshot();
                 std::string model_name = engine_ && engine_->get_model()
                     ? engine_->get_model()->name : "unknown";
                 export_capture("captures", model_name, snapshots,
-                              config_.buffer_size);
-                // Add info anomaly about export
+                               config_.buffer_size);
                 anomaly_buffer_.push({
                     now_timestamp(),
                     Severity::Info,
@@ -312,9 +399,15 @@ void App::on_launch(const AppConfig& config) {
     anomaly_buffer_.resize(100);
 
     if (config.replay_mode) {
-        // Load capture file
-        auto snapshots = import_capture(config.capture_path);
-        snapshot_buffer_.load(snapshots);
+        // Load capture file into replay state
+        replay_snapshots_ = import_capture(config.capture_path);
+        replay_index_     = 0;
+        replay_paused_    = true;
+        // Seed the snapshot buffer with the first frame so the panels are
+        // not completely empty on launch.
+        if (!replay_snapshots_.empty()) {
+            snapshot_buffer_.load(replay_snapshots_);
+        }
         in_dashboard_ = true;
         screen_index_ = 1;
         return;
@@ -324,70 +417,124 @@ void App::on_launch(const AppConfig& config) {
     engine_ = std::make_unique<InferenceEngine>(
         snapshot_buffer_, anomaly_buffer_);
 
-    // Set refresh callback to wake up FTXUI
     engine_->set_refresh_callback([this] {
         screen_.PostEvent(Event::Custom);
     });
 
-    // Wire up topology tree selection to attention visualization
     topology_tree_.set_on_select([this](const std::string& layer_name) {
+        selected_layer_name_ = layer_name;
         if (engine_) {
-            // Add a filter so we specifically capture and focus on this layer
-            // For now, we just log it, but we should tell hook_manager to prioritize it
             debug_log("Selected layer in topology: " + layer_name);
-            attention_heatmap_.set_data({}, 0, 0); // clear until new data arrives
+            // Don't clear attention heatmap here, let refresh_panels do it based on selected_layer_name_
         }
     });
 
-    // Start model loading
     engine_->load_model_async(config.model_path, config.n_ctx,
                                config.n_threads, config.use_gpu);
 
     in_dashboard_ = true;
     screen_index_ = 1;
+
+    // If an initial prompt was given via CLI (-p), fire it once the model loads.
+    if (!cli_initial_prompt_.empty()) {
+        std::string prompt_copy = cli_initial_prompt_;
+        cli_initial_prompt_.clear();
+        // Poll until model is ready, then run in a detached thread
+        std::thread([this, prompt_copy] {
+            using namespace std::chrono_literals;
+            for (int i = 0; i < 120; ++i) {  // wait up to 60 s
+                if (engine_ && engine_->get_state() == InferenceState::Ready) {
+                    engine_->run_inference(prompt_copy);
+                    screen_.PostEvent(Event::Custom);
+                    return;
+                }
+                std::this_thread::sleep_for(500ms);
+            }
+        }).detach();
+    }
 }
 
 // ─── Panel refresh ─────────────────────────────────────────────
 void App::refresh_panels() {
+    bool is_replay_mode = (engine_ == nullptr);
+
+    // ── Replay mode: auto-advance playback ─────────────────────
+    if (is_replay_mode && !replay_snapshots_.empty() && !replay_paused_) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - replay_last_tick_).count();
+
+        if (elapsed >= replay_speed_ms_) {
+            replay_last_tick_ = now;
+            if (replay_index_ + 1 < replay_snapshots_.size()) {
+                ++replay_index_;
+            } else {
+                // End of trace: pause automatically
+                replay_paused_ = true;
+            }
+        }
+
+        // Push current replay snapshot into panels
+        auto& snap = replay_snapshots_[replay_index_];
+        metrics_panel_.set_snapshot(snap);
+        metrics_panel_.add_latency_sample(
+            static_cast<float>(snap.latency_ms));
+        metrics_panel_.add_stats_sample(
+            snap.act_min, snap.act_mean, snap.act_max);
+        if (!snap.attention_weights.empty()) {
+            attention_heatmap_.set_data(
+                snap.attention_weights, snap.attn_size, snap.num_heads);
+        }
+        return;
+    }
+
+    // ── Live mode ──────────────────────────────────────────────
     if (!engine_) return;
 
-    // Update topology with active layer
     auto* model = engine_->get_model();
     if (model) {
-        // Only set topology once
         static bool topology_set = false;
         if (!topology_set) {
             topology_tree_.set_topology(model->topology);
             topology_set = true;
         }
-
-        // Update active layer marker
         topology_tree_.set_active_layer(
             engine_->get_hook_manager().get_active_layer());
     }
 
-    // Update metrics panel with latest snapshot
     if (!snapshot_buffer_.empty()) {
         try {
-            auto latest = snapshot_buffer_.latest();
-            metrics_panel_.set_snapshot(latest);
+            // --- Metrics panel: show selected layer or latest ---
+            LayerSnapshot metrics_snap;
+            if (!selected_layer_name_.empty()) {
+                auto sel_opt = snapshot_buffer_.find_latest([&](const LayerSnapshot& s) {
+                    return s.layer_name == selected_layer_name_;
+                });
+                metrics_snap = sel_opt.value_or(snapshot_buffer_.latest());
+            } else {
+                metrics_snap = snapshot_buffer_.latest();
+            }
+            metrics_panel_.set_snapshot(metrics_snap);
             metrics_panel_.add_latency_sample(
-                static_cast<float>(latest.latency_ms));
+                static_cast<float>(metrics_snap.latency_ms));
             metrics_panel_.add_stats_sample(
-                latest.act_min, latest.act_mean, latest.act_max);
+                metrics_snap.act_min, metrics_snap.act_mean, metrics_snap.act_max);
             metrics_panel_.set_throughput(
                 engine_->get_tokens_per_second());
 
-            // Update attention heatmap if attention data available
-            if (!latest.attention_weights.empty()) {
+            // --- Attention heatmap: ALWAYS find most recent attention data ---
+            auto attn_opt = snapshot_buffer_.find_latest([](const LayerSnapshot& s) {
+                return !s.attention_weights.empty();
+            });
+            if (attn_opt) {
+                auto labels = engine_->get_token_labels();
                 attention_heatmap_.set_data(
-                    latest.attention_weights,
-                    latest.attn_size,
-                    latest.num_heads);
+                    attn_opt->attention_weights,
+                    attn_opt->attn_size,
+                    attn_opt->num_heads,
+                    labels);
             }
-        } catch (...) {
-            // Buffer might be empty between checks
-        }
+        } catch (...) {}
     }
 }
 

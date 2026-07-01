@@ -53,6 +53,7 @@ std::vector<LayerSnapshot> import_capture(const std::string& filepath) {
             snap.latency_ms     = j.value("latency_ms", 0.0);
             snap.tensor_shape   = j.value("tensor_shape", "");
             snap.dtype          = j.value("dtype", "");
+            snap.op_name        = j.value("op_name", "UNKNOWN");
             snap.n_elements     = j.value("n_elements", (int64_t)0);
             snap.sparsity       = j.value("sparsity", 0.0f);
             snap.act_min        = j.value("act_min", 0.0f);

@@ -96,6 +96,7 @@ struct LayerSnapshot {
     double      latency_ms = 0.0;      // Execution time in ms
     std::string tensor_shape;          // e.g., "[1, 32, 4096]"
     std::string dtype;                 // e.g., "q4_K", "f16", "f32"
+    std::string op_name;               // e.g., "MUL_MAT"
     int64_t     n_elements = 0;        // Total number of elements
 
     // Activation statistics
@@ -135,6 +136,8 @@ struct AppConfig {
     int         n_threads   = 4;       // Inference threads
     bool        replay_mode = false;   // True when loading a capture
     bool        use_gpu     = false;   // Use GPU acceleration if available
+    std::string initial_prompt;        // Auto-run prompt from CLI
+    bool        auto_export = false;   // Export capture on exit (--trace)
 };
 
 } // namespace neuralscope

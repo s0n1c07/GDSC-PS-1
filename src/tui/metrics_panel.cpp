@@ -54,6 +54,16 @@ Element MetricsPanel::render() {
 
     // Tensor info
     rows.push_back(hbox({
+        text(" Name         : ") | bold | color(Color::Cyan),
+        text(current_.layer_name),
+    }));
+
+    rows.push_back(hbox({
+        text(" Op           : ") | bold | color(Color::Cyan),
+        text(current_.op_name),
+    }));
+
+    rows.push_back(hbox({
         text(" Tensor Shape : ") | bold | color(Color::Cyan),
         text(current_.tensor_shape),
     }));
@@ -67,14 +77,28 @@ Element MetricsPanel::render() {
 
     rows.push_back(separator());
 
-    // Sparsity gauge
+    // Sparsity blocks
     {
         float sp = current_.sparsity;
+        
+        // Build 20 blocks
+        int total_blocks = 20;
+        int filled = static_cast<int>(sp * total_blocks);
+        
+        std::string bar = "";
+        for (int i = 0; i < total_blocks; ++i) {
+            if (i < filled) {
+                bar += (i > 15) ? "\xF0\x9F\x9F\xA5" /* Red */
+                     : (i > 10) ? "\xF0\x9F\x9F\xA8" /* Yellow */
+                     : "\xF0\x9F\x9F\xA9"; /* Green */
+            } else {
+                bar += "\xE2\xAC\x9C"; /* White/Empty */
+            }
+        }
+
         rows.push_back(hbox({
-            text(" Sparsity     : ") | bold | color(Color::Cyan),
-            gauge(sp) | size(WIDTH, EQUAL, 20) |
-                color(sp > 0.9f ? Color::Red : sp > 0.5f ? Color::Yellow : Color::Green),
-            text(" " + format_float(sp * 100.0f, 1) + "%"),
+            text(" Sparsity Rate: ") | bold | color(Color::Cyan),
+            text(bar + " " + format_float(sp * 100.0f, 1) + "%"),
         }));
     }
 

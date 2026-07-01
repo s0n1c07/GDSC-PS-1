@@ -134,8 +134,9 @@ bool HookManager::on_inspect(struct ggml_tensor* t) {
     snap.tensor_shape = format_shape(t->ne);
     snap.n_elements   = ggml_nelements(t);
 
-    // Dtype
-    snap.dtype = std::string(ggml_type_name(t->type));
+    // Dtype & Op
+    snap.dtype   = std::string(ggml_type_name(t->type));
+    snap.op_name = std::string(ggml_op_name(t->op));
 
     // Compute device
     if (t->buffer) {
@@ -224,24 +225,60 @@ bool HookManager::on_inspect(struct ggml_tensor* t) {
         snap.act_std  = 0.0f;
     }
 
-    // Store attention weights if this is an attention-related tensor
-    // Look for KQV result tensors which contain the attention pattern
-    if (name.find("kqv") != std::string::npos ||
-        name.find("attn_out") != std::string::npos) {
-        // We'll store the output shape info for attention visualization
-        snap.attn_size = static_cast<int>(t->ne[0]);
-        snap.num_heads = static_cast<int>(t->ne[2]);
-        
-        // Extract a small sample of the matrix for visualization (up to 2048x2048 is too big, limit to 256x256)
-        if (t->type == GGML_TYPE_F32) {
-            size_t elements_to_copy = std::min(static_cast<size_t>(ggml_nelements(t)), static_cast<size_t>(256 * 256));
-            snap.attention_weights.resize(elements_to_copy);
-            if (t->buffer && !ggml_backend_buffer_is_host(t->buffer)) {
-                ggml_backend_tensor_get(t, snap.attention_weights.data(), 0, elements_to_copy * sizeof(float));
-            } else if (t->data) {
-                std::memcpy(snap.attention_weights.data(), t->data, elements_to_copy * sizeof(float));
-            }
+    // Store attention weights if this is the softmax attention pattern tensor.
+    // In llama.cpp the key tensor names vary by version. We check:
+    // 1. Name-based: "KQ_soft_max", "soft_max", "kqv", "attn_out"
+    // 2. Op-based: GGML_OP_SOFT_MAX (the softmax output IS the attention matrix)
+    bool is_attn_softmax = (name.find("KQ_soft_max") != std::string::npos ||
+                            name.find("kq_soft_max") != std::string::npos ||
+                            name.find("soft_max")    != std::string::npos ||
+                            name.find("kqv")         != std::string::npos ||
+                            name.find("attn_out")    != std::string::npos ||
+                            t->op == GGML_OP_SOFT_MAX);
+
+    // Log attention-related tensor names for debugging
+    if (name.find("attn") != std::string::npos ||
+        name.find("KQ")   != std::string::npos ||
+        name.find("kq")   != std::string::npos ||
+        name.find("soft") != std::string::npos ||
+        t->op == GGML_OP_SOFT_MAX ||
+        t->op == GGML_OP_MUL_MAT) {
+        debug_log("[ATTN_DEBUG] name=" + name +
+                  " op=" + std::string(ggml_op_name(t->op)) +
+                  " type=" + std::string(ggml_type_name(t->type)) +
+                  " shape=[" + std::to_string(t->ne[0]) + "," +
+                  std::to_string(t->ne[1]) + "," +
+                  std::to_string(t->ne[2]) + "," +
+                  std::to_string(t->ne[3]) + "]" +
+                  " is_match=" + (is_attn_softmax ? "YES" : "NO"));
+    }
+
+    if (is_attn_softmax && t->type == GGML_TYPE_F32) {
+        // ne[0] = sequence length (cols), ne[1] = sequence length (rows),
+        // ne[2] = num heads, ne[3] = batch
+        int seq_len  = static_cast<int>(t->ne[0]);
+        int num_heads = static_cast<int>(t->ne[2] > 0 ? t->ne[2] : 1);
+        snap.attn_size = seq_len;
+        snap.num_heads = num_heads;
+
+        // Cap at 64x64 per head to keep memory sane
+        int cap = std::min(seq_len, 64);
+        size_t elements_to_copy = static_cast<size_t>(cap) * cap * num_heads;
+        elements_to_copy = std::min(elements_to_copy,
+                                    static_cast<size_t>(ggml_nelements(t)));
+
+        snap.attention_weights.resize(elements_to_copy);
+        if (t->buffer && !ggml_backend_buffer_is_host(t->buffer)) {
+            ggml_backend_tensor_get(t, snap.attention_weights.data(), 0,
+                                    elements_to_copy * sizeof(float));
+        } else if (t->data) {
+            std::memcpy(snap.attention_weights.data(), t->data,
+                        elements_to_copy * sizeof(float));
         }
+        snap.attn_size = cap; // update to capped size
+        debug_log("[ATTN_CAPTURED] name=" + name + " attn_size=" + std::to_string(cap) +
+                  " num_heads=" + std::to_string(num_heads) +
+                  " weights_count=" + std::to_string(snap.attention_weights.size()));
     }
 
     // Push to ring buffer

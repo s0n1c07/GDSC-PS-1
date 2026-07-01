@@ -13,8 +13,10 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 
+#include <chrono>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace neuralscope {
 
@@ -27,6 +29,10 @@ public:
     /// Run the application (blocks until quit).
     void run();
 
+    /// Pre-configure and skip the startup menu (used when CLI flags are given).
+    void launch_with_config(const AppConfig& config,
+                             const std::string& initial_prompt = "");
+
 private:
     /// Build the startup menu screen.
     ftxui::Component build_startup_screen();
@@ -37,7 +43,7 @@ private:
     /// Handle the launch action from startup menu.
     void on_launch(const AppConfig& config);
 
-    /// Update panels with latest data from ring buffer.
+    /// Update panels with latest data from ring buffer / replay state.
     void refresh_panels();
 
     // ─── Core state ────────────────────────────────────────────
@@ -67,6 +73,18 @@ private:
     std::string                 prompt_text_;
     std::string                 status_text_ = "Ready";
     static constexpr int        NUM_PANELS = 5;
+
+    // ─── Replay state ──────────────────────────────────────────
+    std::vector<LayerSnapshot>  replay_snapshots_;   // Loaded from capture file
+    size_t                      replay_index_  = 0;  // Current playback position
+    bool                        replay_paused_ = true;
+    int                         replay_speed_ms_ = 500; // ms between auto-steps
+    std::chrono::steady_clock::time_point replay_last_tick_;
+
+    std::string selected_layer_name_; // To track the currently selected layer
+
+    // ─── CLI state ─────────────────────────────────────────────
+    std::string                 cli_initial_prompt_; // Auto-run prompt from -p
 };
 
 } // namespace neuralscope

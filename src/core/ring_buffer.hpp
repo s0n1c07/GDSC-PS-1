@@ -4,6 +4,7 @@
 #include <mutex>
 #include <vector>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 
 namespace neuralscope {
@@ -59,6 +60,18 @@ public:
             result.push_back(buffer_[buffer_.size() - 1 - i]);
         }
         return result;
+    }
+
+    /// Find the most recent item that matches a condition.
+    std::optional<T> find_latest(std::function<bool(const T&)> predicate) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (buffer_.empty()) return std::nullopt;
+        for (auto it = buffer_.rbegin(); it != buffer_.rend(); ++it) {
+            if (predicate(*it)) {
+                return *it;
+            }
+        }
+        return std::nullopt;
     }
 
     size_t size() const {

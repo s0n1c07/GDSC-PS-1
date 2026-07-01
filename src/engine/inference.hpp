@@ -70,6 +70,9 @@ public:
     /// Get last error message.
     std::string get_error() const;
 
+    /// Get current token labels (thread-safe).
+    std::vector<std::string> get_token_labels() const;
+
 private:
     void worker_load(const std::string& model_path, int n_ctx, int n_threads, bool use_gpu);
     void worker_inference(const std::string& prompt, int max_tokens);
@@ -90,6 +93,9 @@ private:
 
     mutable std::mutex          error_mutex_;
     std::string                 error_message_;
+
+    mutable std::mutex          token_labels_mutex_;
+    std::vector<std::string>    token_labels_;
 
     std::thread                 worker_thread_;
 

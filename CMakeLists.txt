@@ -50,6 +50,14 @@ FetchContent_Declare(json
 set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(json)
 
+# ─── CLI11 (header-only CLI argument parser) ────────────────────
+FetchContent_Declare(cli11
+    GIT_REPOSITORY https://github.com/CLIUtils/CLI11
+    GIT_TAG        v2.4.2
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(cli11)
+
 # ─── NeuralScope executable ─────────────────────────────────────
 set(NEURALSCOPE_SOURCES
     src/main.cpp
@@ -85,6 +93,7 @@ target_link_libraries(neuralscope PRIVATE
     ftxui::dom
     ftxui::component
     nlohmann_json::nlohmann_json
+    CLI11::CLI11
 )
 
 # On Windows, link against ws2_32 for potential networking needs

@@ -109,6 +109,11 @@ std::string InferenceEngine::get_error() const {
     return error_message_;
 }
 
+std::vector<std::string> InferenceEngine::get_token_labels() const {
+    std::lock_guard<std::mutex> lock(token_labels_mutex_);
+    return token_labels_;
+}
+
 void InferenceEngine::notify_refresh() {
     std::lock_guard<std::mutex> lock(refresh_mutex_);
     if (refresh_callback_) {
@@ -191,6 +196,26 @@ void InferenceEngine::worker_inference(const std::string& prompt,
         }
         tokens.resize(n_tokens);
 
+        // Convert prompt tokens to string labels
+        {
+            std::lock_guard<std::mutex> lock(token_labels_mutex_);
+            token_labels_.clear();
+            for (int i = 0; i < n_tokens; ++i) {
+                char buf[256];
+                int len = llama_token_to_piece(vocab, tokens[i],
+                                              buf, sizeof(buf), 0, true);
+                if (len > 0) {
+                    std::string piece(buf, len);
+                    // Trim whitespace for cleaner display
+                    while (!piece.empty() && piece[0] == ' ') piece.erase(0, 1);
+                    if (piece.empty()) piece = "_";
+                    token_labels_.push_back(piece);
+                } else {
+                    token_labels_.push_back("<" + std::to_string(i) + ">");
+                }
+            }
+        }
+
         if (tokens.empty()) {
             {
                 std::lock_guard<std::mutex> lock(error_mutex_);
@@ -256,6 +281,14 @@ void InferenceEngine::worker_inference(const std::string& prompt,
                 {
                     std::lock_guard<std::mutex> lock(text_mutex_);
                     generated_text_ += piece;
+                }
+                // Add to token labels
+                {
+                    std::lock_guard<std::mutex> lock(token_labels_mutex_);
+                    std::string label = piece;
+                    while (!label.empty() && label[0] == ' ') label.erase(0, 1);
+                    if (label.empty()) label = "_";
+                    token_labels_.push_back(label);
                 }
             }
 
