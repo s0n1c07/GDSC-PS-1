@@ -46,7 +46,7 @@ mkdir build
 cd build
 
 # 4. Configure (adjust LLAMA_CPP_DIR if needed)
-cmake .. -DLLAMA_CPP_DIR="C:/Users/Rajve/OneDrive/Desktop/llama.cpp"
+cmake .. -DLLAMA_CPP_DIR="C:/../llama.cpp"
 
 # 5. Build
 cmake --build . --config Release
