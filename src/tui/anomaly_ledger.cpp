@@ -64,8 +64,7 @@ Element AnomalyLedger::render() {
     }
 
     return vbox(std::move(lines)) | flex |
-           vscroll_indicator | frame |
-           borderStyled(ROUNDED) | color(Color::GrayDark);
+           vscroll_indicator | frame;
 }
 
 } // namespace neuralscope

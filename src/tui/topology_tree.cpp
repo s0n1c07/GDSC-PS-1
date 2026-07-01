@@ -174,8 +174,7 @@ Element TopologyTree::render(bool is_focused) {
         lines.push_back(text("  No model loaded") | dim);
     }
 
-    return vbox(std::move(lines)) | vscroll_indicator | flex |
-           (is_focused ? color(Color::Cyan) : color(Color::GrayDark));
+    return vbox(std::move(lines)) | vscroll_indicator | flex;
 }
 
 } // namespace neuralscope

@@ -162,8 +162,7 @@ Element MetricsPanel::render() {
             bold | color(Color::GreenLight),
     }));
 
-    return vbox(std::move(rows)) | flex |
-           borderStyled(ROUNDED) | color(Color::GrayDark);
+    return vbox(std::move(rows)) | flex;
 }
 
 } // namespace neuralscope

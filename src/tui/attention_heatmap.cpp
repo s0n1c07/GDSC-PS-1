@@ -119,7 +119,7 @@ Element AttentionHeatmap::render() {
         return vbox({
             text("  No attention data available") | dim | center,
             text("  Select an attention layer from the topology") | dim | center,
-        }) | flex | borderStyled(ROUNDED) | color(Color::GrayDark);
+        }) | flex;
     }
 
     std::vector<Element> rows;
@@ -193,8 +193,7 @@ Element AttentionHeatmap::render() {
         text(" [ / ]: Head ") | dim,
     }));
 
-    return vbox(std::move(rows)) | flex |
-           borderStyled(ROUNDED) | color(Color::GrayDark);
+    return vbox(std::move(rows)) | flex;
 }
 
 } // namespace neuralscope

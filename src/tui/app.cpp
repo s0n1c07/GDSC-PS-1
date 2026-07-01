@@ -160,13 +160,9 @@ Component App::build_dashboard() {
             refresh_panels();
 
             auto border_for = [&](Component comp) {
-                return comp->Focused()
+                return borderStyled(ROUNDED) | (comp->Focused()
                     ? color(Color::Cyan)
-                    : color(Color::GrayDark);
-            };
-
-            auto focus_text = [&](Component comp) {
-                return comp->Focused() ? " (Focus Active)" : "";
+                    : color(Color::GrayDark));
             };
 
             // Build state string
@@ -195,29 +191,10 @@ Component App::build_dashboard() {
 
             double tps = engine_ ? engine_->get_tokens_per_second() : 0.0;
 
-            // Top status bar
-            auto status_bar = hbox({
-                text(" [Tab]") | bold | color(Color::Cyan),
-                text(": Cycle Focus  ") | dim,
-                text("[Q]") | bold | color(Color::Cyan),
-                text(": Quit App  ") | dim,
-                is_replay_mode
-                    ? hbox({
-                        text("[Space]") | bold | color(Color::Yellow),
-                        text(": Play/Pause  ") | dim,
-                        text("[n]") | bold | color(Color::Yellow),
-                        text(": Step  ") | dim,
-                        text("[ ][ ]") | bold | color(Color::Yellow),
-                        text(": Speed  ") | dim,
-                      })
-                    : hbox({
-                        text("[P]") | bold | color(Color::Cyan),
-                        text(": Pause  ") | dim,
-                        text("[E]") | bold | color(Color::Cyan),
-                        text(": Export  ") | dim,
-                        text("[Esc]") | bold | color(Color::Cyan),
-                        text(": Menu  ") | dim,
-                      }),
+            // Top Application Header
+            auto header_bar = hbox({
+                text(" NeuralScope ") | bold | bgcolor(Color::Blue) | color(Color::White),
+                text(" | Non-Invasive Model Inspector") | dim,
                 filler(),
                 text(" " + state_str + " ") | bold |
                     color(state_str.find("Error") != std::string::npos
@@ -230,26 +207,21 @@ Component App::build_dashboard() {
 
             // Row 1: Topology (35%) + Packet Stream (65%)
             auto row1 = hbox({
-                window(text(std::string(" 1. MODEL TOPOLOGY") + focus_text(topology_comp)) | bold | color(Color::Cyan),
-                       topology_comp->Render())
+                window(text(" MODEL TOPOLOGY ") | bold | center, topology_comp->Render())
                     | size(WIDTH, EQUAL, 40) | border_for(topology_comp),
-                window(text(std::string(" 2. LIVE PACKET STREAM") + focus_text(stream_comp)) | bold | color(Color::Cyan),
-                       stream_comp->Render())
+                window(text(" LIVE PACKET STREAM ") | bold | center, stream_comp->Render())
                     | flex | border_for(stream_comp),
             }) | size(HEIGHT, EQUAL, 12);
 
             // Row 2: Attention Heatmap (full width)
-            auto row2 = window(text(std::string(" 3. ATTENTION MATRIX VISUALIZER") + focus_text(heatmap_comp)) | bold | color(Color::Cyan),
-                               heatmap_comp->Render())
+            auto row2 = window(text(" ATTENTION MATRIX VISUALIZER ") | bold | center, heatmap_comp->Render())
                 | border_for(heatmap_comp) | size(HEIGHT, EQUAL, 12);
 
             // Row 3: Metrics (50%) + Anomaly Ledger (50%)
             auto row3 = hbox({
-                window(text(std::string(" 4. RUNTIME METRICS INSPECTOR") + focus_text(metrics_comp)) | bold | color(Color::Cyan),
-                       metrics_comp->Render())
+                window(text(" RUNTIME METRICS INSPECTOR ") | bold | center, metrics_comp->Render())
                     | flex | border_for(metrics_comp),
-                window(text(std::string(" 5. NUMERICAL ANOMALY LEDGER") + focus_text(anomaly_comp)) | bold | color(Color::Cyan),
-                       anomaly_comp->Render())
+                window(text(" NUMERICAL ANOMALY LEDGER ") | bold | center, anomaly_comp->Render())
                     | flex | border_for(anomaly_comp),
             });
 
@@ -310,13 +282,32 @@ Component App::build_dashboard() {
                        : color(Color::GrayDark));
             }
 
+            // Bottom Hotkey Legend
+            auto hotkey_legend = is_replay_mode
+                ? hbox({
+                    text(" [Tab]") | bold | color(Color::Cyan), text(": Focus  ") | dim,
+                    text("[Q]") | bold | color(Color::Cyan), text(": Quit  ") | dim,
+                    text("[Esc]") | bold | color(Color::Cyan), text(": Menu  ") | dim,
+                    text("[Space]") | bold | color(Color::Yellow), text(": Play/Pause  ") | dim,
+                    text("[n]") | bold | color(Color::Yellow), text(": Step  ") | dim,
+                    text("[ ][ ]") | bold | color(Color::Yellow), text(": Speed") | dim,
+                  }) | center
+                : hbox({
+                    text(" [Tab]") | bold | color(Color::Cyan), text(": Focus  ") | dim,
+                    text("[Q]") | bold | color(Color::Cyan), text(": Quit  ") | dim,
+                    text("[Esc]") | bold | color(Color::Cyan), text(": Menu  ") | dim,
+                    text("[P]") | bold | color(Color::Yellow), text(": Pause  ") | dim,
+                    text("[E]") | bold | color(Color::Yellow), text(": Export") | dim,
+                  }) | center;
+
             return vbox({
-                status_bar,
+                header_bar,
                 row1,
                 row2,
                 row3,
                 gen_display,
                 bottom_bar,
+                hotkey_legend,
             });
         }),
         [&, prompt_input, this](Event event) -> bool {

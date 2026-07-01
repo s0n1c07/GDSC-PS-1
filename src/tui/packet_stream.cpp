@@ -131,7 +131,7 @@ Element PacketStream::render() {
         vbox(std::move(rows)),
         separator(),
         status_elem,
-    }) | flex | borderStyled(ROUNDED) | color(Color::GrayDark);
+    }) | flex;
 }
 
 void PacketStream::toggle_pause() {
